@@ -14,14 +14,14 @@ alembic==1.13.1
 # Authentication & Security
 passlib[bcrypt]==1.7.4
 pyjwt==2.8.0
-python-multipart==0.0.6
+python-multipart==0.0.18
 
 # Redis & Background Workers
 redis==5.0.1
 rq==1.16.1
 
 # HTTP Requests & APIs
-requests==2.31.0
+requests==2.32.4
 httpx==0.26.0
 
 # Environment & Configuration
@@ -52,5 +52,5 @@ pytest-asyncio==0.23.4
 httpx==0.26.0
 
 # Development
-black==24.1.1
+black==24.3.0
 ruff==0.2.1
