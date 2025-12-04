@@ -15,7 +15,7 @@ from slowapi.errors import RateLimitExceeded
 from app.database import init_db, close_db
 
 # Import routers
-from app.routers import auth, messages, contacts, calendar, workflows
+from app.routers import auth, contacts, messages, calendar, workflows, settings
 from app.sms_handler import router as sms_router
 
 # Configure structured logging
@@ -138,6 +138,7 @@ app.include_router(contacts.router, prefix="/api/contacts", tags=["Contacts"])
 app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(sms_router, prefix="/api/sms", tags=["SMS"])
+app.include_router(settings.router, prefix="/settings", tags=["settings"])
 
 
 # Exception handlers

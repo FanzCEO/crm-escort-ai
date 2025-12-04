@@ -258,3 +258,48 @@ class CalendarSyncToken(Base):
 
     def __repr__(self) -> str:
         return f"<CalendarSyncToken(user_id='{self.user_id}', type='{self.calendar_type}')>"
+
+
+class UserSettings(Base):
+    """User preferences and settings"""
+    __tablename__ = "user_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    
+    # Notification preferences
+    email_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sms_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    push_notifications: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # AI preferences
+    auto_extract_contacts: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    auto_create_events: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    auto_create_tasks: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    # Display preferences
+    theme: Mapped[str] = mapped_column(String(20), default="system", nullable=False)
+    language: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
+    date_format: Mapped[str] = mapped_column(String(20), default="YYYY-MM-DD", nullable=False)
+    time_format: Mapped[str] = mapped_column(String(10), default="24h", nullable=False)
+    
+    # Calendar preferences
+    default_event_duration: Mapped[int] = mapped_column(Integer, default=60, nullable=False)  # minutes
+    week_starts_on: Mapped[str] = mapped_column(String(10), default="monday", nullable=False)
+    
+    # Privacy preferences
+    show_online_status: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_user_settings_user_id", "user_id"),
+        CheckConstraint("theme IN ('light', 'dark', 'system')", name="check_theme"),
+        CheckConstraint("time_format IN ('12h', '24h')", name="check_time_format"),
+        CheckConstraint("week_starts_on IN ('sunday', 'monday')", name="check_week_starts"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserSettings(user_id='{self.user_id}')>"

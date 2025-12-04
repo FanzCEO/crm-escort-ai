@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 import logging
@@ -11,11 +11,22 @@ import logging
 from app.database import get_db
 from app.models import User, Event as EventModel, Contact, Location
 from app.auth import get_current_user
-from app.google_calendar import GoogleCalendarManager
-from app.outlook_calendar import OutlookCalendarManager
+from app.caldav_calendar import (
+    CalDAVCalendarManager,
+    CalendarProvider,
+    CalendarConfig,
+    get_apple_calendar,
+    get_samsung_calendar,
+    MultiCalendarSync,
+    CALDAV_URLS
+)
+import os
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Calendar manager cache
+_calendar_managers: Dict[str, CalDAVCalendarManager] = {}
 
 
 class EventResponse(BaseModel):
@@ -49,16 +60,20 @@ class EventCreate(BaseModel):
     contact_id: Optional[str] = None
     location_id: Optional[str] = None
 
-    @validator('end_time')
-    def validate_end_time(cls, v, values):
-        if 'start_time' in values and v <= values['start_time']:
+    @field_validator('end_time')
+    @classmethod
+    def validate_end_time(cls, v, info):
+        if 'start_time' in info.data and v <= info.data['start_time']:
             raise ValueError('End time must be after start time')
         return v
 
 
 class CalendarAuthRequest(BaseModel):
-    provider: str = Field(..., regex="^(google|outlook)$")
-    auth_code: Optional[str] = None
+    provider: str = Field(..., pattern="^(apple|samsung|google|outlook)$")
+    username: Optional[str] = None  # For CalDAV (Apple/Samsung)
+    password: Optional[str] = None  # App-specific password for Apple
+    calendar_name: Optional[str] = None
+    auth_code: Optional[str] = None  # For OAuth (Google/Outlook)
     redirect_uri: Optional[str] = None
 
 
@@ -79,9 +94,10 @@ class EventUpdate(BaseModel):
     contact_id: Optional[str] = None
     location_id: Optional[str] = None
 
-    @validator('end_time')
-    def validate_end_time(cls, v, values):
-        if v and 'start_time' in values and values['start_time'] and v <= values['start_time']:
+    @field_validator('end_time')
+    @classmethod
+    def validate_end_time(cls, v, info):
+        if v and 'start_time' in info.data and info.data['start_time'] and v <= info.data['start_time']:
             raise ValueError('End time must be after start time')
         return v
 
@@ -392,70 +408,235 @@ async def delete_event(
     return None
 
 
-@router.post("/auth/{provider}")
-async def initiate_calendar_auth(
-    provider: str,
+@router.get("/providers")
+async def list_calendar_providers(
     current_user: User = Depends(get_current_user)
-) -> Dict[str, str]:
-    """Initiate OAuth flow for calendar provider"""
-    
-    if provider == "google":
-        try:
-            manager = GoogleCalendarManager()
-            auth_url = await manager.get_authorization_url()
-            return {"auth_url": auth_url, "provider": "google"}
-        except Exception as e:
-            logger.error(f"Error initiating Google calendar auth: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to initiate Google auth: {str(e)}")
-    
-    elif provider == "outlook":
-        try:
-            manager = OutlookCalendarManager()
-            auth_url = await manager.get_authorization_url()
-            return {"auth_url": auth_url, "provider": "outlook"}
-        except Exception as e:
-            logger.error(f"Error initiating Outlook calendar auth: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to initiate Outlook auth: {str(e)}")
-    
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported calendar provider")
+) -> Dict[str, Any]:
+    """List available calendar providers and their status"""
+
+    providers = {
+        "internal": {
+            "name": "Built-in Calendar",
+            "status": "active",
+            "type": "internal",
+            "description": "CRM's internal calendar - always available"
+        },
+        "apple": {
+            "name": "Apple iCloud Calendar",
+            "status": "available",
+            "type": "caldav",
+            "description": "Sync with iCloud Calendar (requires app-specific password)",
+            "setup_url": "https://appleid.apple.com/account/manage"
+        },
+        "samsung": {
+            "name": "Samsung Calendar",
+            "status": "available",
+            "type": "caldav",
+            "description": "Sync with Samsung Calendar"
+        }
+    }
+
+    # Check if providers are configured
+    if os.getenv("APPLE_CALENDAR_USERNAME"):
+        providers["apple"]["status"] = "configured"
+    if os.getenv("SAMSUNG_CALENDAR_USERNAME"):
+        providers["samsung"]["status"] = "configured"
+
+    return {"providers": providers}
 
 
-@router.post("/auth/callback")
-async def handle_calendar_auth_callback(
+@router.post("/connect")
+async def connect_calendar(
     auth_data: CalendarAuthRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
-) -> Dict[str, str]:
-    """Handle OAuth callback and store credentials"""
-    
+) -> Dict[str, Any]:
+    """Connect to a calendar provider (Apple/Samsung via CalDAV)"""
+
     try:
-        if auth_data.provider == "google":
-            manager = GoogleCalendarManager()
-            credentials = await manager.exchange_auth_code(
-                auth_data.auth_code, 
-                auth_data.redirect_uri
+        if auth_data.provider == "apple":
+            if not auth_data.username or not auth_data.password:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Apple Calendar requires username (Apple ID) and app-specific password"
+                )
+
+            manager = get_apple_calendar(
+                username=auth_data.username,
+                app_password=auth_data.password,
+                calendar_name=auth_data.calendar_name
             )
-            # Store credentials for user (implement in User model or separate table)
-            # TODO: Store credentials securely
-            
-        elif auth_data.provider == "outlook":
-            manager = OutlookCalendarManager()
-            credentials = await manager.exchange_auth_code(
-                auth_data.auth_code, 
-                auth_data.redirect_uri
+
+            if await manager.connect():
+                # Cache the manager for this user
+                _calendar_managers[f"{current_user.id}_apple"] = manager
+                calendars = await manager.list_calendars()
+                return {
+                    "status": "connected",
+                    "provider": "apple",
+                    "message": "Successfully connected to Apple iCloud Calendar",
+                    "calendars": calendars
+                }
+            else:
+                raise HTTPException(status_code=401, detail="Failed to authenticate with Apple iCloud")
+
+        elif auth_data.provider == "samsung":
+            if not auth_data.username or not auth_data.password:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Samsung Calendar requires username and password"
+                )
+
+            manager = get_samsung_calendar(
+                username=auth_data.username,
+                password=auth_data.password,
+                calendar_name=auth_data.calendar_name
             )
-            # Store credentials for user
-            # TODO: Store credentials securely
-            
+
+            if await manager.connect():
+                _calendar_managers[f"{current_user.id}_samsung"] = manager
+                calendars = await manager.list_calendars()
+                return {
+                    "status": "connected",
+                    "provider": "samsung",
+                    "message": "Successfully connected to Samsung Calendar",
+                    "calendars": calendars
+                }
+            else:
+                raise HTTPException(status_code=401, detail="Failed to authenticate with Samsung")
+
         else:
-            raise HTTPException(status_code=400, detail="Unsupported calendar provider")
-        
-        return {"message": f"Successfully connected {auth_data.provider} calendar", "status": "success"}
-        
+            raise HTTPException(status_code=400, detail="Use /connect for Apple/Samsung. Google/Outlook not supported.")
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error handling calendar auth callback: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to complete authentication: {str(e)}")
+        logger.error(f"Error connecting to {auth_data.provider}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to connect: {str(e)}")
+
+
+@router.get("/external/{provider}")
+async def get_external_events(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+) -> Dict[str, Any]:
+    """Get events from external calendar (Apple/Samsung)"""
+
+    if provider not in ["apple", "samsung"]:
+        raise HTTPException(status_code=400, detail="Provider must be 'apple' or 'samsung'")
+
+    manager_key = f"{current_user.id}_{provider}"
+    manager = _calendar_managers.get(manager_key)
+
+    if not manager:
+        # Try to connect from environment variables
+        if provider == "apple":
+            username = os.getenv("APPLE_CALENDAR_USERNAME")
+            password = os.getenv("APPLE_CALENDAR_PASSWORD")
+            if username and password:
+                manager = get_apple_calendar(username, password)
+                if await manager.connect():
+                    _calendar_managers[manager_key] = manager
+        elif provider == "samsung":
+            username = os.getenv("SAMSUNG_CALENDAR_USERNAME")
+            password = os.getenv("SAMSUNG_CALENDAR_PASSWORD")
+            if username and password:
+                manager = get_samsung_calendar(username, password)
+                if await manager.connect():
+                    _calendar_managers[manager_key] = manager
+
+    if not manager:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{provider.title()} calendar not connected. Use POST /api/calendar/connect first."
+        )
+
+    events = await manager.get_events(start_date, end_date)
+    return {
+        "provider": provider,
+        "events": events,
+        "count": len(events)
+    }
+
+
+@router.post("/external/{provider}/create")
+async def create_external_event(
+    provider: str,
+    event_data: EventCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Create event on external calendar and optionally in CRM"""
+
+    if provider not in ["apple", "samsung"]:
+        raise HTTPException(status_code=400, detail="Provider must be 'apple' or 'samsung'")
+
+    manager_key = f"{current_user.id}_{provider}"
+    manager = _calendar_managers.get(manager_key)
+
+    if not manager:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{provider.title()} calendar not connected. Use POST /api/calendar/connect first."
+        )
+
+    # Get contact name if contact_id provided
+    contact_name = None
+    if event_data.contact_id:
+        try:
+            contact_uuid = uuid.UUID(event_data.contact_id)
+            contact_query = select(Contact).where(
+                and_(Contact.id == contact_uuid, Contact.user_id == current_user.id)
+            )
+            contact_result = await db.execute(contact_query)
+            contact = contact_result.scalar_one_or_none()
+            if contact:
+                contact_name = contact.name
+        except:
+            pass
+
+    # Create on external calendar
+    external_uid = await manager.create_event(
+        title=event_data.title,
+        start_time=event_data.start_time,
+        end_time=event_data.end_time,
+        description=event_data.description,
+        contact_name=contact_name
+    )
+
+    if not external_uid:
+        raise HTTPException(status_code=500, detail=f"Failed to create event on {provider}")
+
+    # Also create in internal CRM calendar
+    event = EventModel(
+        id=uuid.uuid4(),
+        user_id=current_user.id,
+        title=event_data.title,
+        description=event_data.description,
+        start_time=event_data.start_time,
+        end_time=event_data.end_time,
+        all_day=event_data.all_day,
+        attendees=event_data.attendees,
+        contact_id=uuid.UUID(event_data.contact_id) if event_data.contact_id else None,
+        location_id=uuid.UUID(event_data.location_id) if event_data.location_id else None,
+        external_calendar_id=external_uid,
+        external_calendar_type=provider,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+
+    db.add(event)
+    await db.commit()
+
+    return {
+        "status": "created",
+        "internal_id": str(event.id),
+        "external_id": external_uid,
+        "provider": provider,
+        "message": f"Event created on both CRM and {provider.title()} calendar"
+    }
 
 
 @router.post("/sync/{provider}", response_model=CalendarSyncResponse)
@@ -464,35 +645,66 @@ async def sync_specific_calendar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> CalendarSyncResponse:
-    """Sync with specific external calendar service"""
-    
+    """Sync with specific external calendar service (Apple/Samsung)"""
+
+    if provider not in ["apple", "samsung"]:
+        raise HTTPException(status_code=400, detail="Provider must be 'apple' or 'samsung'")
+
     try:
+        manager_key = f"{current_user.id}_{provider}"
+        manager = _calendar_managers.get(manager_key)
+
+        if not manager:
+            return CalendarSyncResponse(
+                provider=provider,
+                events_synced=0,
+                success=False,
+                message=f"{provider.title()} calendar not connected. Use POST /api/calendar/connect first."
+            )
+
+        # Get events from external calendar
+        external_events = await manager.get_events()
         events_synced = 0
-        
-        if provider == "google":
-            manager = GoogleCalendarManager()
-            # TODO: Get stored credentials for user
-            # events = await manager.get_events()
-            # Process and sync events
-            events_synced = 0  # Placeholder
-            
-        elif provider == "outlook":
-            manager = OutlookCalendarManager()
-            # TODO: Get stored credentials for user  
-            # events = await manager.get_events()
-            # Process and sync events
-            events_synced = 0  # Placeholder
-            
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported calendar provider")
-        
+
+        for ext_event in external_events:
+            # Check if event already exists in CRM
+            existing_query = select(EventModel).where(
+                and_(
+                    EventModel.user_id == current_user.id,
+                    EventModel.external_calendar_id == ext_event.get('uid'),
+                    EventModel.external_calendar_type == provider
+                )
+            )
+            existing_result = await db.execute(existing_query)
+            existing = existing_result.scalar_one_or_none()
+
+            if not existing and ext_event.get('start') and ext_event.get('end'):
+                # Import new event
+                new_event = EventModel(
+                    id=uuid.uuid4(),
+                    user_id=current_user.id,
+                    title=ext_event.get('title', 'Imported Event'),
+                    description=ext_event.get('description'),
+                    start_time=ext_event['start'],
+                    end_time=ext_event['end'],
+                    all_day=False,
+                    external_calendar_id=ext_event.get('uid'),
+                    external_calendar_type=provider,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                db.add(new_event)
+                events_synced += 1
+
+        await db.commit()
+
         return CalendarSyncResponse(
             provider=provider,
             events_synced=events_synced,
             success=True,
-            message=f"Successfully synced {events_synced} events from {provider}"
+            message=f"Successfully synced {events_synced} new events from {provider.title()}"
         )
-        
+
     except Exception as e:
         logger.error(f"Error syncing {provider} calendar: {e}")
         return CalendarSyncResponse(

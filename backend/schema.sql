@@ -134,6 +134,39 @@ CREATE TABLE IF NOT EXISTS calendar_sync_tokens (
     UNIQUE(user_id, calendar_type)
 );
 
+-- User Settings table
+CREATE TABLE IF NOT EXISTS user_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Notification preferences
+    email_notifications BOOLEAN NOT NULL DEFAULT true,
+    sms_notifications BOOLEAN NOT NULL DEFAULT true,
+    push_notifications BOOLEAN NOT NULL DEFAULT true,
+    
+    -- AI preferences
+    auto_extract_contacts BOOLEAN NOT NULL DEFAULT true,
+    auto_create_events BOOLEAN NOT NULL DEFAULT true,
+    auto_create_tasks BOOLEAN NOT NULL DEFAULT true,
+    
+    -- Display preferences
+    theme VARCHAR(20) NOT NULL DEFAULT 'system' CHECK (theme IN ('light', 'dark', 'system')),
+    language VARCHAR(10) NOT NULL DEFAULT 'en',
+    timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
+    date_format VARCHAR(20) NOT NULL DEFAULT 'YYYY-MM-DD',
+    time_format VARCHAR(10) NOT NULL DEFAULT '24h' CHECK (time_format IN ('12h', '24h')),
+    
+    -- Calendar preferences
+    default_event_duration INTEGER NOT NULL DEFAULT 60,
+    week_starts_on VARCHAR(10) NOT NULL DEFAULT 'monday' CHECK (week_starts_on IN ('sunday', 'monday')),
+    
+    -- Privacy preferences
+    show_online_status BOOLEAN NOT NULL DEFAULT true,
+    
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts USING gin(name gin_trgm_ops);
@@ -145,6 +178,7 @@ CREATE INDEX IF NOT EXISTS idx_events_start_time ON events(start_time);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date);
 CREATE INDEX IF NOT EXISTS idx_workflows_user_id ON workflows(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings(user_id);
 
 -- Trigger to update updated_at timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -172,4 +206,7 @@ CREATE TRIGGER update_workflows_updated_at BEFORE UPDATE ON workflows
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_calendar_sync_tokens_updated_at BEFORE UPDATE ON calendar_sync_tokens
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_user_settings_updated_at BEFORE UPDATE ON user_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

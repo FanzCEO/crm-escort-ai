@@ -13,10 +13,13 @@ import structlog
 
 logger = structlog.get_logger()
 
-# Initialize OpenAI client
-client = AsyncOpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+# Initialize OpenAI client with optional API key
+api_key = os.getenv("OPENAI_API_KEY")
+if api_key:
+    client = AsyncOpenAI(api_key=api_key)
+else:
+    client = None
+    logger.warning("OpenAI API key not set. AI extraction features will be disabled.")
 
 # AI extraction prompt
 EXTRACTION_PROMPT = """
@@ -92,6 +95,17 @@ class AIExtractor:
         Returns:
             Extracted data as dictionary
         """
+        # Return empty result if no OpenAI client available
+        if not client:
+            logger.warning("OpenAI client not available. Returning empty extraction results.")
+            return {
+                "contacts": [],
+                "events": [],
+                "tasks": [],
+                "locations": [],
+                "intent": None
+            }
+        
         try:
             # Build the prompt with context
             full_prompt = self._build_prompt(message_content, sender, context)
@@ -160,7 +174,7 @@ class AIExtractor:
     def _validate_extracted_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and clean extracted data"""
         
-        result = {
+        result: Dict[str, Any] = {
             "contacts": [],
             "events": [],
             "tasks": [],
