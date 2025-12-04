@@ -20,6 +20,7 @@ services:
       retries: 5
     networks:
       - crm-network
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -35,6 +36,7 @@ services:
       retries: 5
     networks:
       - crm-network
+    restart: unless-stopped
 
   backend:
     build:
@@ -47,28 +49,43 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DB_URL: postgresql://crm_user:${POSTGRES_PASSWORD:-change_me_in_prod}@postgres:5432/crm_escort
+      DB_URL: postgresql+asyncpg://crm_user:${POSTGRES_PASSWORD:-change_me_in_prod}@postgres:5432/crm_escort
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGO: ${JWT_ALGO:-HS256}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER}
+      TWILIO_WEBHOOK_URL: ${TWILIO_WEBHOOK_URL}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
       OUTLOOK_CLIENT_ID: ${OUTLOOK_CLIENT_ID}
       OUTLOOK_CLIENT_SECRET: ${OUTLOOK_CLIENT_SECRET}
+      OUTLOOK_REDIRECT_URI: ${OUTLOOK_REDIRECT_URI}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       ENV: ${ENV:-production}
       DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - backend_logs:/var/log/crm-escort-ai
     networks:
       - crm-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   worker:
     build:
@@ -81,24 +98,87 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DB_URL: postgresql://crm_user:${POSTGRES_PASSWORD:-change_me_in_prod}@postgres:5432/crm_escort
+      DB_URL: postgresql+asyncpg://crm_user:${POSTGRES_PASSWORD:-change_me_in_prod}@postgres:5432/crm_escort
       REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
       JWT_SECRET: ${JWT_SECRET}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      OUTLOOK_CLIENT_ID: ${OUTLOOK_CLIENT_ID}
+      OUTLOOK_CLIENT_SECRET: ${OUTLOOK_CLIENT_SECRET}
       ENV: ${ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - ./backend:/app
-    command: python -m app.workers.worker
+      - worker_logs:/var/log/crm-escort-ai
+    command: celery -A app.workers.worker worker --loglevel=info --concurrency=4
     networks:
       - crm-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.workers.worker", "inspect", "ping"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  # Optional: Celery Flower for monitoring
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: crm-escort-flower
+    depends_on:
+      - redis
+      - worker
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "5555:5555"
+    command: celery -A app.workers.worker flower --port=5555
+    networks:
+      - crm-network
+    profiles:
+      - monitoring
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: crm-escort-nginx
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - crm-network
+    restart: unless-stopped
+    profiles:
+      - production
 
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+  worker_logs:
+    driver: local
+  nginx_logs:
+    driver: local
 
 networks:
   crm-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

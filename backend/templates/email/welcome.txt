@@ -1,0 +1,29 @@
+Welcome to CRM Escort AI!
+
+Hello {{ user_name }}!
+
+Thank you for joining CRM Escort AI. We're excited to help you revolutionize your customer relationship management with the power of artificial intelligence.
+
+🎉 Your account is ready!
+
+You can now start managing your contacts, scheduling appointments, and automating your workflows with our AI-powered platform.
+
+What's Next?
+- Import Contacts: Upload your existing contact list or connect external services
+- Set Up Calendar: Connect Google Calendar or Outlook for seamless scheduling  
+- Configure SMS: Set up automated SMS workflows for client communication
+- Create Workflows: Design intelligent automation for your business processes
+
+Get started here: {{ dashboard_url }}
+
+If you have any questions, our support team is here to help. Simply reply to this email or visit our help center.
+
+Best regards,
+The CRM Escort AI Team
+
+---
+© {{ current_year }} CRM Escort AI. All rights reserved.
+
+Unsubscribe: {{ unsubscribe_url }}
+Privacy Policy: {{ privacy_url }}
+Support: {{ support_url }}

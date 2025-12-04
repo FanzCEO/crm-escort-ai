@@ -8,11 +8,13 @@ from sqlalchemy.pool import NullPool
 import os
 
 # Database URL from environment
-DATABASE_URL = os.getenv("DB_URL", "postgresql+psycopg://crm_user:password@localhost:5432/crm_escort")
+DATABASE_URL = os.getenv("DB_URL", "postgresql+asyncpg://crm_user:password@localhost:5432/crm_escort")
 
-# Convert postgresql:// to postgresql+psycopg:// for async
+# Convert postgresql:// to postgresql+asyncpg:// for async
 if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+elif "psycopg" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+asyncpg://", 1)
 
 # Create async engine
 engine = create_async_engine(
@@ -66,7 +68,7 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         # Import all models here to ensure they're registered
-        from app import models  # noqa: F401
+        import app.models  # noqa: F401
         
         await conn.run_sync(Base.metadata.create_all)
 

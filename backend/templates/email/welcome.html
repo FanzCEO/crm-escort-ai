@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to CRM Escort AI</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .content {
+            padding: 30px;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .highlight {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border-left: 4px solid #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome to CRM Escort AI!</h1>
+            <p>Your intelligent customer relationship management platform</p>
+        </div>
+        
+        <div class="content">
+            <h2>Hello {{ user_name }}!</h2>
+            
+            <p>Thank you for joining CRM Escort AI. We're excited to help you revolutionize your customer relationship management with the power of artificial intelligence.</p>
+            
+            <div class="highlight">
+                <h3>🎉 Your account is ready!</h3>
+                <p>You can now start managing your contacts, scheduling appointments, and automating your workflows with our AI-powered platform.</p>
+            </div>
+            
+            <h3>What's Next?</h3>
+            <ul>
+                <li><strong>Import Contacts:</strong> Upload your existing contact list or connect external services</li>
+                <li><strong>Set Up Calendar:</strong> Connect Google Calendar or Outlook for seamless scheduling</li>
+                <li><strong>Configure SMS:</strong> Set up automated SMS workflows for client communication</li>
+                <li><strong>Create Workflows:</strong> Design intelligent automation for your business processes</li>
+            </ul>
+            
+            <div style="text-align: center;">
+                <a href="{{ dashboard_url }}" class="btn">Get Started</a>
+            </div>
+            
+            <p>If you have any questions, our support team is here to help. Simply reply to this email or visit our help center.</p>
+            
+            <p>Best regards,<br>
+            The CRM Escort AI Team</p>
+        </div>
+        
+        <div class="footer">
+            <p>&copy; {{ current_year }} CRM Escort AI. All rights reserved.</p>
+            <p>
+                <a href="{{ unsubscribe_url }}">Unsubscribe</a> | 
+                <a href="{{ privacy_url }}">Privacy Policy</a> | 
+                <a href="{{ support_url }}">Support</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

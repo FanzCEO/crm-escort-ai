@@ -1,0 +1,40 @@
+📅 Appointment Reminder
+
+Hello {{ client_name }}!
+
+This is a friendly reminder about your upcoming appointment.
+
+Appointment Details:
+{{ appointment_title }}
+
+📅 Date: {{ appointment_date }}
+🕐 Time: {{ appointment_time }}
+📍 Location: {{ appointment_location }}
+{% if appointment_description %}
+📝 Notes: {{ appointment_description }}
+{% endif %}
+{% if duration %}
+⏱️ Duration: {{ duration }}
+{% endif %}
+
+{% if confirmation_url %}
+Confirm Appointment: {{ confirmation_url }}
+{% endif %}
+{% if reschedule_url %}
+Reschedule: {{ reschedule_url }}
+{% endif %}
+
+If you need to make any changes or have questions about your appointment, please don't hesitate to contact us.
+
+{% if contact_info %}
+Contact Information:
+{{ contact_info }}
+{% endif %}
+
+We look forward to seeing you!
+
+Best regards,
+{{ sender_name }}
+
+---
+© {{ current_year }} CRM Escort AI. All rights reserved.
